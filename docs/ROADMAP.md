@@ -9,10 +9,11 @@ benchmarked before the next begins. See `docs/ARCHITECTURE.md` for the design.
 
 ## Current status
 
-- **Active phase:** Phase 2 (not started)
-- **Last completed:** Phase 1 — editor core (buffer, config, fileio, runnable stub)
+- **Active phase:** Phase 3 (not started)
+- **Last completed:** Phase 2 — Bubble Tea TUI (editor core, UI adapter, Emacs nav, save/quit)
 - **Tree is green:** `go test -race ./...` passes; benchmarks run.
-- **Dependencies:** none yet (stdlib only). Bubble Tea is introduced in Phase 2.
+- **Dependencies:** `bubbletea`, `lipgloss`, `go-runewidth` (direct). `bubbles`
+  not yet used (Phase 2 used a custom renderer); add it if a widget fits later.
 
 ---
 
@@ -36,28 +37,34 @@ on a FIFO/device blocks before the regular-file check can reject it.
 
 ---
 
-## Phase 2 — Bubble Tea TUI Integration ☐ NEXT
+## Phase 2 — Bubble Tea TUI Integration ✅ DONE
 
 Goal: an interactive editor with viewport rendering and Emacs cursor movement.
 
-- ☐ Add deps: `charmbracelet/bubbletea`, `lipgloss`, `bubbles` (`go get`); commit
-  `go.mod`/`go.sum`. (First third-party deps — needs network.)
-- ☐ `internal/editor`: framework-agnostic editor state — cursor (rune index +
-  line/col), viewport (top line, height/width), and edit commands operating on
-  the `buffer`. Add a **cached line index** here for O(log n)/O(1) cursor moves
-  (the Phase-5 buffer-tree note can wait; the line index belongs with the cursor).
-- ☐ `internal/ui`: Bubble Tea `Model`/`Update`/`View` adapter over `editor`.
-  Keep all Bubble Tea imports confined to this package.
-- ☐ Emacs navigation: `C-f C-b C-p C-n C-a C-e`, plus self-insert, backspace,
-  newline. Wire from `config.DefaultKeybindings()` (parse chords; multi-key
-  sequences like `C-x C-s` can be stubbed until Phase 4 config parsing).
-- ☐ Viewport rendering with `lipgloss`; horizontal/vertical scrolling; UTF-8
-  display width (wcwidth) for CJK/emoji so the cursor aligns.
-- ☐ Integration tests driving `Model.Update` with `tea.KeyMsg` sequences and
-  asserting on `View()` / cursor state (no real terminal needed).
-- ☐ Replace the `cmd/chiquito` stub with `tea.NewProgram(...)`.
+- ☑ Added deps: `bubbletea`, `lipgloss`, `go-runewidth`.
+- ☑ `internal/editor`: framework-agnostic state — cursor (rune index source of
+  truth + derived line/col), viewport (top line, w/h), edit commands. Cached
+  `LineIndex` (`lineindex.go`) gives O(log n) movement (benchmark: 70 ns/op,
+  0 allocs). Files: `editor.go`, `lineindex.go`, `*_test.go`, `*_bench_test.go`.
+- ☑ `internal/ui`: Bubble Tea `Model`/`Update`/`View` over `editor`; all
+  charmbracelet imports confined here. Files: `model.go`, `keymap.go`, `view.go`.
+- ☑ Emacs nav `C-f C-b C-p C-n C-a C-e`, `C-d`, `C-k`, self-insert, enter,
+  backspace, tab; arrows/home/end/pgup/pgdn as built-ins. Multi-key sequences
+  (`C-x C-s` save, `C-x C-c` quit) via a pending-prefix state machine, driven by
+  `config.DefaultKeybindings()`.
+- ☑ Rendering with `lipgloss`; vertical + horizontal scrolling; display-width
+  (wcwidth) aware clipping/cursor so CJK/emoji align; line-number gutter;
+  reverse-video status bar with name/dirty/position and transient messages.
+- ☑ Integration tests drive `Model.Update` with `tea.KeyMsg` and assert on
+  buffer/cursor/`View()` (no terminal). Save/quit-confirm covered.
+- ☑ `cmd/chiquito` runs `tea.NewProgram(model, tea.WithAltScreen())`.
 
-Validation: build/vet/test green; manual smoke test over SSH/local terminal.
+**Notes / deferred to later phases:** `open` (needs a minibuffer prompt) and
+`search`/`replace` are stubbed with status messages; tab reindex is O(n) per
+edit (Phase 5); no syntax colors yet (Phase 3).
+
+Validation: `go test -race ./...` green; binary builds and exits cleanly when no
+TTY is present. (Interactive smoke test must be run by a human in a terminal.)
 
 ---
 
