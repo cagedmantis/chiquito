@@ -29,7 +29,12 @@ func main() {
 }
 
 func run(args []string) error {
-	cfg := config.Default()
+	cfg, _, err := config.Load()
+	if err != nil {
+		// A broken config file shouldn't prevent editing; fall back to defaults.
+		cfg = config.Default()
+		fmt.Fprintln(os.Stderr, "chiquito: using defaults:", err)
+	}
 
 	var (
 		content []byte
@@ -51,6 +56,6 @@ func run(args []string) error {
 
 	model := ui.New(ed, cfg)
 	prog := tea.NewProgram(model, tea.WithAltScreen())
-	_, err := prog.Run()
+	_, err = prog.Run()
 	return err
 }

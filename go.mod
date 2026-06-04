@@ -3,6 +3,7 @@ module argc.dev/chiquito
 go 1.26.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-runewidth v0.0.24

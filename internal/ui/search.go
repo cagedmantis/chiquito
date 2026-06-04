@@ -8,11 +8,10 @@ import (
 	"argc.dev/chiquito/internal/search"
 )
 
-// handleMinibuffer routes keys while a search or replace prompt is active.
+// handleMinibuffer routes keys while a search, replace, or file prompt is active.
 func (m *Model) handleMinibuffer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	chord := msg.String()
 
-	// Cancel from any prompt.
 	if chord == "esc" || chord == "ctrl+g" {
 		m.cancelPrompt()
 		return m, nil
@@ -25,6 +24,8 @@ func (m *Model) handleMinibuffer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.replaceFromKey(msg)
 	case modeReplaceTo:
 		return m.replaceToKey(msg)
+	case modeOpen, modeSaveAs:
+		return m.promptKey(msg)
 	}
 	return m, nil
 }
@@ -42,15 +43,13 @@ func (m *Model) searchKey(msg tea.KeyMsg, chord string) (tea.Model, tea.Cmd) {
 		m.caseSensitive = !m.caseSensitive
 		m.recomputeSearch()
 	case msg.Type == tea.KeyBackspace:
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
-			m.recomputeSearch()
-		}
+		m.query.backspace()
+		m.recomputeSearch()
 	case msg.Type == tea.KeyRunes:
-		m.query += string(msg.Runes)
+		m.query.insert(string(msg.Runes))
 		m.recomputeSearch()
 	case msg.Type == tea.KeySpace:
-		m.query += " "
+		m.query.insert(" ")
 		m.recomputeSearch()
 	}
 	return m, nil
@@ -59,20 +58,18 @@ func (m *Model) searchKey(msg tea.KeyMsg, chord string) (tea.Model, tea.Cmd) {
 func (m *Model) replaceFromKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
-		if m.query == "" {
+		if m.query.String() == "" {
 			m.cancelPrompt()
 			return m, nil
 		}
 		m.mode = modeReplaceTo
-		m.replaceWith = ""
+		m.replaceWith.clear()
 	case tea.KeyBackspace:
-		if r := []rune(m.query); len(r) > 0 {
-			m.query = string(r[:len(r)-1])
-		}
+		m.query.backspace()
 	case tea.KeyRunes:
-		m.query += string(msg.Runes)
+		m.query.insert(string(msg.Runes))
 	case tea.KeySpace:
-		m.query += " "
+		m.query.insert(" ")
 	}
 	return m, nil
 }
@@ -80,23 +77,23 @@ func (m *Model) replaceFromKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) replaceToKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
-		newText, count := search.ReplaceAll(m.ed.Text(), m.query, m.replaceWith, m.opts())
+		newText, count := search.ReplaceAll(m.ed.Text(), m.query.String(), m.replaceWith.String(), m.opts())
+		var cmd tea.Cmd
 		if count > 0 {
 			m.ed.SetText(newText)
-			m.markEdited()
+			cmd = m.onEdit()
 		}
 		m.status = fmt.Sprintf("Replaced %d occurrence(s)", count)
 		m.mode = modeNormal
 		m.matches = nil
 		m.applyLayout()
+		return m, cmd
 	case tea.KeyBackspace:
-		if r := []rune(m.replaceWith); len(r) > 0 {
-			m.replaceWith = string(r[:len(r)-1])
-		}
+		m.replaceWith.backspace()
 	case tea.KeyRunes:
-		m.replaceWith += string(msg.Runes)
+		m.replaceWith.insert(string(msg.Runes))
 	case tea.KeySpace:
-		m.replaceWith += " "
+		m.replaceWith.insert(" ")
 	}
 	return m, nil
 }
@@ -105,7 +102,7 @@ func (m *Model) replaceToKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) startSearch() {
 	m.mode = modeSearch
-	m.query = ""
+	m.query.clear()
 	m.matches = nil
 	m.matchIdx = 0
 	m.searchOrigin = m.ed.CursorPos()
@@ -114,8 +111,8 @@ func (m *Model) startSearch() {
 
 func (m *Model) startReplace() {
 	m.mode = modeReplaceFrom
-	m.query = ""
-	m.replaceWith = ""
+	m.query.clear()
+	m.replaceWith.clear()
 	m.searchOrigin = m.ed.CursorPos()
 	m.status = ""
 }
@@ -123,7 +120,7 @@ func (m *Model) startReplace() {
 // recomputeSearch refreshes matches for the current query and jumps the cursor
 // to the first match at or after the search origin.
 func (m *Model) recomputeSearch() {
-	m.matches = search.FindAll(m.ed.Text(), m.query, m.opts())
+	m.matches = search.FindAll(m.ed.Text(), m.query.String(), m.opts())
 	if len(m.matches) == 0 {
 		m.ed.SetCursor(m.searchOrigin)
 		m.applyLayout()
@@ -161,10 +158,15 @@ func (m *Model) gotoCurrentMatch() {
 	m.applyLayout()
 }
 
+// cancelPrompt closes any active prompt; for search it restores the cursor to
+// where the search began.
 func (m *Model) cancelPrompt() {
-	m.ed.SetCursor(m.searchOrigin)
+	if m.mode == modeSearch {
+		m.ed.SetCursor(m.searchOrigin)
+		m.applyLayout()
+	}
 	m.mode = modeNormal
 	m.matches = nil
+	m.input.clear()
 	m.status = ""
-	m.applyLayout()
 }

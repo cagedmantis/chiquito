@@ -9,11 +9,12 @@ benchmarked before the next begins. See `docs/ARCHITECTURE.md` for the design.
 
 ## Current status
 
-- **Active phase:** Phase 4 (not started)
-- **Last completed:** Phase 3 — search/replace engine + syntax highlighting (Go, Markdown)
+- **Active phase:** Phase 5 (not started)
+- **Last completed:** Phase 4 — async spell check, TOML parsing + hot-reload,
+  keybinding parser, generalized minibuffer + file open/save-as
 - **Tree is green:** `go test -race ./...` passes; benchmarks run.
-- **Dependencies:** `bubbletea`, `lipgloss`, `go-runewidth` (direct). `bubbles`
-  not yet used; add it if a widget fits later.
+- **Dependencies:** `bubbletea`, `lipgloss`, `go-runewidth`, `BurntSushi/toml`
+  (direct). Hot-reload uses polling (no fsnotify dep). `bubbles` still unused.
 
 ---
 
@@ -91,23 +92,41 @@ TTY is present. (Interactive smoke test must be run by a human in a terminal.)
 
 ---
 
-## Phase 4 — Spell Checker & Customization ☐
+## Phase 4 — Spell Checker & Customization ✅ DONE
 
-- ☐ `internal/spell`: asynchronous checker. Runs in a goroutine over immutable
-  text snapshots; returns misspelling spans as `tea.Msg`. Must never block
-  `Update` during typing or load. Dictionary load is lazy/async.
-- ☐ TOML config **parsing** (`BurntSushi/toml` or `pelletier/go-toml`): load
-  `config.toml`, merge over `Default()`, validate, write a default file if none.
-- ☐ Hot-reload: watch the config file (fsnotify or poll) and apply changes live,
-  including keybindings and feature toggles.
-- ☐ Keybinding parser for full chords / multi-key sequences (`C-x C-s` etc.).
-- ☐ Tests: config round-trip/merge/validation; spell checker concurrency
-  (race detector); hot-reload behavior.
+- ☑ **Generalized minibuffer + interactive file open.** Extracted a reusable
+  `lineInput` (`internal/ui/prompt.go`); search/replace now use it too.
+  - ☑ `open` (`C-x C-f`): prompts for a path, `fileio.Read`, loads a fresh
+    editor, re-selects the syntax `Language`; missing path → empty buffer bound
+    to the name. Replaced the old stub.
+  - ☑ Save-as: `C-x C-s` on a nameless buffer prompts for a path, binds + writes.
+- ☑ `internal/spell`: pure checker (`Check` → misspelling rune spans) with a
+  case-insensitive `WordSet`, system word-list loader (`/usr/share/dict/words`)
+  + built-in fallback, and code-token heuristics (skip camelCase/snake_case/
+  ALLCAPS/digits). UI runs it **off-thread**: `Init` loads the dictionary async;
+  edits schedule a debounced (`250ms`) check; a `docVersion` guard discards
+  stale results; misspellings render with a red underline.
+- ☑ TOML parsing (`BurntSushi/toml`): `config.Load`/`Parse`/`Marshal`/`Save`;
+  layers the file over `Default()` (scalars override, keybindings merge),
+  validates/repairs, and writes a default file on first run.
+- ☑ Hot-reload: `Init` starts a `1.5s` poll (`configTickMsg`); on mtime change
+  the config reloads and `applyConfig` rebinds keys, re-themes, updates editor
+  settings, and toggles spell checking live. (Polling, not fsnotify — no dep,
+  portable.)
+- ☑ Keybinding parser: `config.NormalizeChord` accepts Emacs (`C-x C-s`, `M-%`)
+  or Bubble Tea (`ctrl+x ctrl+s`) notation; the UI keymap normalizes on build.
+- ☑ Tests: config round-trip/merge/validate/normalize; spell offsets/heuristics/
+  concurrency (race); hot-reload + key rebinding; open/save-as/cancel flows.
 
 ---
 
 ## Phase 5 — Hardening, Benchmarking & Polish ☐
 
+- ☐ **CLI: `--help` / `--version` / flag parsing.** `cmd/chiquito` currently does
+  raw `os.Args[1:]` with no flag handling — `chiquito --help` tries to open a
+  file named `--help`. Add a `flag.FlagSet` with usage text (synopsis, options,
+  default keybindings, config path). Dependency-free; could be pulled forward at
+  any time if wanted sooner.
 - ☐ Security audit: revisit symlink/TOCTOU handling, temp-file lifecycle, large/
   malformed/binary file behavior, path handling.
 - ☐ Fuzz tests: `buffer` insert/delete invariants, UTF-8 round-trip, config

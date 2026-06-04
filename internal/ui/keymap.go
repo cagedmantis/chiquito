@@ -21,7 +21,8 @@ func newKeymap(cfg config.Config) keymap {
 		prefixes: make(map[string]bool),
 	}
 	for action, chord := range cfg.Keys.Bindings {
-		chord = strings.TrimSpace(chord)
+		// Accept Emacs ("C-x C-s") or Bubble Tea ("ctrl+x ctrl+s") notation.
+		chord = config.NormalizeChord(strings.TrimSpace(chord))
 		if chord == "" {
 			continue
 		}

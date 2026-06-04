@@ -16,6 +16,8 @@ var (
 	tildeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
 	statusStyle = lipgloss.NewStyle().Reverse(true)
+
+	misspellColor = lipgloss.Color("9")
 )
 
 // View implements tea.Model.
@@ -91,9 +93,24 @@ func (m *Model) lineStyles(lineIdx int, runes []rune) []lipgloss.Style {
 		}
 	}
 
+	lineStart := m.ed.LineStartPos(lineIdx)
+
+	// Underline misspelled words (normal editing only; search overlay wins).
+	if m.mode == modeNormal && len(m.spellSpans) > 0 {
+		for _, sp := range m.spellSpans {
+			s := sp.Start - lineStart
+			e := sp.End - lineStart
+			if e <= 0 || s >= len(styles) {
+				continue
+			}
+			for i := maxInt(0, s); i < minInt(len(styles), e); i++ {
+				styles[i] = styles[i].Underline(true).Foreground(misspellColor)
+			}
+		}
+	}
+
 	// Overlay search matches (only while a search prompt is active).
 	if m.mode == modeSearch && len(m.matches) > 0 {
-		lineStart := m.ed.LineStartPos(lineIdx)
 		for mi, mt := range m.matches {
 			s := mt.Start - lineStart
 			e := mt.End - lineStart
@@ -203,14 +220,18 @@ func (m *Model) prompt() string {
 		count := ""
 		if len(m.matches) > 0 {
 			count = fmt.Sprintf(" (%d/%d)", m.matchIdx+1, len(m.matches))
-		} else if m.query != "" {
+		} else if m.query.String() != "" {
 			count = " (no matches)"
 		}
-		return fmt.Sprintf(" I-search[%s]: %s%s", cs, m.query, count)
+		return fmt.Sprintf(" I-search[%s]: %s%s", cs, m.query.String(), count)
 	case modeReplaceFrom:
-		return fmt.Sprintf(" Replace[%s]: %s", cs, m.query)
+		return fmt.Sprintf(" Replace[%s]: %s", cs, m.query.String())
 	case modeReplaceTo:
-		return fmt.Sprintf(" Replace %q with: %s", m.query, m.replaceWith)
+		return fmt.Sprintf(" Replace %q with: %s", m.query.String(), m.replaceWith.String())
+	case modeOpen:
+		return fmt.Sprintf(" Open file: %s", m.input.String())
+	case modeSaveAs:
+		return fmt.Sprintf(" Save as: %s", m.input.String())
 	}
 	return ""
 }

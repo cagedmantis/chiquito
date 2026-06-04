@@ -38,3 +38,14 @@ func FilePath() (string, error) {
 	}
 	return filepath.Join(dir, FileName), nil
 }
+
+// resolvePath returns the config file path without creating any directories.
+// Used by read-only callers (e.g. ModTime) so that merely constructing the
+// editor does not create the config directory.
+func resolvePath() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, appName, FileName), nil
+}

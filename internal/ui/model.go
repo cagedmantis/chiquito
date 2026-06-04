@@ -1,12 +1,15 @@
 // Package ui is the Bubble Tea adapter over the framework-agnostic editor core.
-// All charmbracelet imports are confined to this package; internal/editor knows
-// nothing about the terminal. The Model translates key messages into editor
-// commands and renders the editor state, with syntax highlighting and search,
-// to a string.
+// All charmbracelet imports are confined to this package; the core packages
+// (editor, search, syntax, spell) know nothing about the terminal. The Model
+// translates key messages into editor commands and renders the editor state —
+// with syntax highlighting, search, and asynchronous spell checking — to a
+// string. Slow work (dictionary loading, spell checking, config polling) runs in
+// commands off the Update thread and reports back via messages.
 package ui
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -14,6 +17,7 @@ import (
 	"argc.dev/chiquito/internal/editor"
 	"argc.dev/chiquito/internal/fileio"
 	"argc.dev/chiquito/internal/search"
+	"argc.dev/chiquito/internal/spell"
 	"argc.dev/chiquito/internal/syntax"
 )
 
@@ -25,6 +29,13 @@ const (
 	modeSearch
 	modeReplaceFrom // entering the search term for a replace
 	modeReplaceTo   // entering the replacement text
+	modeOpen        // entering a path to open
+	modeSaveAs      // entering a path to save to
+)
+
+const (
+	spellDebounce      = 250 * time.Millisecond
+	configPollInterval = 1500 * time.Millisecond
 )
 
 // Model is the Bubble Tea model. It is used via a pointer so command handlers
@@ -34,36 +45,46 @@ type Model struct {
 	km  keymap
 	cfg config.Config
 
-	width, height int // terminal size in cells
-	hscroll       int // horizontal scroll offset in display columns
+	width, height int
+	hscroll       int
 	tabWidth      int
 	lineNumbers   bool
 
-	pending     string // first key of an in-progress multi-key sequence
-	status      string // transient message shown in the status bar
-	confirmQuit bool   // armed when quit was requested with unsaved changes
+	pending     string
+	status      string
+	confirmQuit bool
 	quitting    bool
 
-	// search / replace state
+	// minibuffer / search / replace state
 	mode          mode
-	query         string         // current search term
-	replaceWith   string         // replacement text (replace mode)
-	caseSensitive bool           // search case sensitivity
-	matches       []search.Match // matches for the current query
-	matchIdx      int            // index of the current match
-	searchOrigin  int            // cursor position when search began (for cancel)
+	input         lineInput // generic prompt text (open, save-as)
+	query         lineInput // current search term
+	replaceWith   lineInput // replacement text
+	caseSensitive bool
+	matches       []search.Match
+	matchIdx      int
+	searchOrigin  int
 
 	// syntax highlighting state
 	lang        syntax.Language
 	theme       theme
-	enterStates []syntax.State // entering lexical state per line (cached)
-	synStale    bool           // enterStates needs recomputation
+	enterStates []syntax.State
+	synStale    bool
+
+	// spell checking state
+	checker    spell.Dictionary
+	spellSpans []spell.Misspelling
+	docVersion int // bumped on every edit; guards stale async results
+
+	// config hot-reload state
+	configMod time.Time
 }
 
 // New constructs a Model for the given editor and configuration.
 func New(ed *editor.Editor, cfg config.Config) *Model {
 	ed.SetTabStops(cfg.Editor.TabWidth, cfg.Editor.ExpandTabs)
-	m := &Model{
+	mt, _ := config.ModTime()
+	return &Model{
 		ed:          ed,
 		km:          newKeymap(cfg),
 		cfg:         cfg,
@@ -74,12 +95,9 @@ func New(ed *editor.Editor, cfg config.Config) *Model {
 		lang:        syntax.ForFilename(ed.Name()),
 		theme:       themeByName(cfg.Theme.Name),
 		synStale:    true,
+		configMod:   mt,
 	}
-	return m
 }
-
-// Init implements tea.Model.
-func (m *Model) Init() tea.Cmd { return nil }
 
 // Update implements tea.Model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -93,6 +111,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleMinibuffer(msg)
 		}
 		return m.handleKey(msg)
+	case dictLoadedMsg:
+		m.checker = msg.dict
+		return m, m.runSpellCmd(m.docVersion)
+	case spellTickMsg:
+		if msg.version == m.docVersion && m.checker != nil {
+			return m, m.runSpellCmd(m.docVersion)
+		}
+		return m, nil
+	case spellResultMsg:
+		if msg.version == m.docVersion {
+			m.spellSpans = msg.spans
+		}
+		return m, nil
+	case configTickMsg:
+		return m, m.maybeReloadConfig()
 	}
 	return m, nil
 }
@@ -102,8 +135,14 @@ func (m *Model) applyLayout() {
 	m.syncHScroll()
 }
 
-// markEdited records that the document changed so syntax state is recomputed.
-func (m *Model) markEdited() { m.synStale = true }
+// onEdit records a document change: it invalidates syntax state, bumps the doc
+// version (so in-flight async results are discarded), and returns a debounced
+// spell-check command.
+func (m *Model) onEdit() tea.Cmd {
+	m.synStale = true
+	m.docVersion++
+	return m.scheduleSpell()
+}
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	chord := msg.String()
@@ -138,6 +177,7 @@ func (m *Model) dispatch(action string) (tea.Model, tea.Cmd) {
 		m.confirmQuit = false
 	}
 	m.status = ""
+	var cmd tea.Cmd
 
 	switch action {
 	case "cursor-forward":
@@ -154,51 +194,52 @@ func (m *Model) dispatch(action string) (tea.Model, tea.Cmd) {
 		m.ed.LineEnd()
 	case "delete-forward":
 		m.ed.DeleteForward()
-		m.markEdited()
+		cmd = m.onEdit()
 	case "kill-line":
 		m.ed.KillLine()
-		m.markEdited()
+		cmd = m.onEdit()
 	case "search":
 		m.startSearch()
 	case "replace":
 		m.startReplace()
-	case "save":
-		m.save()
 	case "open":
-		m.status = "open: interactive prompt arrives in a later phase"
+		m.startOpen()
+	case "save":
+		return m.save()
 	case "quit":
 		return m.quit()
 	default:
 		m.status = "unbound action: " + action
 	}
 	m.applyLayout()
-	return m, nil
+	return m, cmd
 }
 
 // handleInput processes built-in keys: navigation and text entry.
 func (m *Model) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.confirmQuit = false
 	m.status = ""
+	edited := false
 
 	switch msg.Type {
 	case tea.KeyRunes:
 		m.ed.Insert(string(msg.Runes))
-		m.markEdited()
+		edited = true
 	case tea.KeySpace:
 		m.ed.InsertRune(' ')
-		m.markEdited()
+		edited = true
 	case tea.KeyEnter:
 		m.ed.InsertNewline()
-		m.markEdited()
+		edited = true
 	case tea.KeyTab:
 		m.ed.InsertRune('\t')
-		m.markEdited()
+		edited = true
 	case tea.KeyBackspace:
 		m.ed.DeleteBackward()
-		m.markEdited()
+		edited = true
 	case tea.KeyDelete:
 		m.ed.DeleteForward()
-		m.markEdited()
+		edited = true
 	case tea.KeyLeft:
 		m.ed.MoveLeft()
 	case tea.KeyRight:
@@ -220,23 +261,29 @@ func (m *Model) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ed.MoveDown()
 		}
 	default:
-		// Unhandled key; ignore.
+	}
+
+	var cmd tea.Cmd
+	if edited {
+		cmd = m.onEdit()
 	}
 	m.applyLayout()
-	return m, nil
+	return m, cmd
 }
 
-func (m *Model) save() {
+// save writes the current file, or starts a save-as prompt for a scratch buffer.
+func (m *Model) save() (tea.Model, tea.Cmd) {
 	if m.ed.Name() == "" {
-		m.status = "No file name to save to"
-		return
+		m.startSaveAs()
+		return m, nil
 	}
 	if err := fileio.WriteAtomic(m.ed.Name(), m.ed.Bytes()); err != nil {
 		m.status = "Save failed: " + err.Error()
-		return
+		return m, nil
 	}
 	m.ed.MarkSaved()
 	m.status = fmt.Sprintf("Wrote %s", m.ed.Name())
+	return m, nil
 }
 
 func (m *Model) quit() (tea.Model, tea.Cmd) {
