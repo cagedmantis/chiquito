@@ -1,7 +1,8 @@
 // Package ui is the Bubble Tea adapter over the framework-agnostic editor core.
 // All charmbracelet imports are confined to this package; internal/editor knows
 // nothing about the terminal. The Model translates key messages into editor
-// commands and renders the editor state to a string.
+// commands and renders the editor state, with syntax highlighting and search,
+// to a string.
 package ui
 
 import (
@@ -12,6 +13,18 @@ import (
 	"argc.dev/chiquito/internal/config"
 	"argc.dev/chiquito/internal/editor"
 	"argc.dev/chiquito/internal/fileio"
+	"argc.dev/chiquito/internal/search"
+	"argc.dev/chiquito/internal/syntax"
+)
+
+// mode is the model's input mode: normal editing or an active minibuffer prompt.
+type mode int
+
+const (
+	modeNormal mode = iota
+	modeSearch
+	modeReplaceFrom // entering the search term for a replace
+	modeReplaceTo   // entering the replacement text
 )
 
 // Model is the Bubble Tea model. It is used via a pointer so command handlers
@@ -30,12 +43,27 @@ type Model struct {
 	status      string // transient message shown in the status bar
 	confirmQuit bool   // armed when quit was requested with unsaved changes
 	quitting    bool
+
+	// search / replace state
+	mode          mode
+	query         string         // current search term
+	replaceWith   string         // replacement text (replace mode)
+	caseSensitive bool           // search case sensitivity
+	matches       []search.Match // matches for the current query
+	matchIdx      int            // index of the current match
+	searchOrigin  int            // cursor position when search began (for cancel)
+
+	// syntax highlighting state
+	lang        syntax.Language
+	theme       theme
+	enterStates []syntax.State // entering lexical state per line (cached)
+	synStale    bool           // enterStates needs recomputation
 }
 
 // New constructs a Model for the given editor and configuration.
 func New(ed *editor.Editor, cfg config.Config) *Model {
 	ed.SetTabStops(cfg.Editor.TabWidth, cfg.Editor.ExpandTabs)
-	return &Model{
+	m := &Model{
 		ed:          ed,
 		km:          newKeymap(cfg),
 		cfg:         cfg,
@@ -43,7 +71,11 @@ func New(ed *editor.Editor, cfg config.Config) *Model {
 		lineNumbers: cfg.Editor.LineNumbers,
 		width:       80,
 		height:      24,
+		lang:        syntax.ForFilename(ed.Name()),
+		theme:       themeByName(cfg.Theme.Name),
+		synStale:    true,
 	}
+	return m
 }
 
 // Init implements tea.Model.
@@ -57,23 +89,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyLayout()
 		return m, nil
 	case tea.KeyMsg:
+		if m.mode != modeNormal {
+			return m.handleMinibuffer(msg)
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-// applyLayout recomputes the editor's text viewport from the terminal size and
-// the current gutter width (which depends on the line count), then keeps the
-// cursor visible both vertically and horizontally.
 func (m *Model) applyLayout() {
 	m.ed.SetSize(m.textWidth(), m.textHeight())
 	m.syncHScroll()
 }
 
+// markEdited records that the document changed so syntax state is recomputed.
+func (m *Model) markEdited() { m.synStale = true }
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	chord := msg.String()
 
-	// Complete an in-progress multi-key sequence (e.g. C-x C-s).
 	if m.pending != "" {
 		combo := m.pending + " " + chord
 		m.pending = ""
@@ -85,19 +119,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Begin a multi-key sequence.
 	if m.km.isPrefix(chord) {
 		m.pending = chord
 		m.status = chord + "-"
 		return m, nil
 	}
 
-	// A configured single-chord action.
 	if action, ok := m.km.lookup(chord); ok {
 		return m.dispatch(action)
 	}
 
-	// Otherwise: built-in navigation/editing keys and text input.
 	return m.handleInput(msg)
 }
 
@@ -123,14 +154,18 @@ func (m *Model) dispatch(action string) (tea.Model, tea.Cmd) {
 		m.ed.LineEnd()
 	case "delete-forward":
 		m.ed.DeleteForward()
+		m.markEdited()
 	case "kill-line":
 		m.ed.KillLine()
+		m.markEdited()
+	case "search":
+		m.startSearch()
+	case "replace":
+		m.startReplace()
 	case "save":
 		m.save()
 	case "open":
 		m.status = "open: interactive prompt arrives in a later phase"
-	case "search", "replace":
-		m.status = action + ": arrives in phase 3"
 	case "quit":
 		return m.quit()
 	default:
@@ -140,9 +175,7 @@ func (m *Model) dispatch(action string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleInput processes built-in keys: arrows/home/end/page navigation and text
-// entry. Configured Emacs chords are handled in dispatch; this covers keys a
-// user expects regardless of the keymap.
+// handleInput processes built-in keys: navigation and text entry.
 func (m *Model) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.confirmQuit = false
 	m.status = ""
@@ -150,16 +183,22 @@ func (m *Model) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyRunes:
 		m.ed.Insert(string(msg.Runes))
+		m.markEdited()
 	case tea.KeySpace:
 		m.ed.InsertRune(' ')
+		m.markEdited()
 	case tea.KeyEnter:
 		m.ed.InsertNewline()
+		m.markEdited()
 	case tea.KeyTab:
 		m.ed.InsertRune('\t')
+		m.markEdited()
 	case tea.KeyBackspace:
 		m.ed.DeleteBackward()
+		m.markEdited()
 	case tea.KeyDelete:
 		m.ed.DeleteForward()
+		m.markEdited()
 	case tea.KeyLeft:
 		m.ed.MoveLeft()
 	case tea.KeyRight:
@@ -208,4 +247,8 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 	}
 	m.quitting = true
 	return m, tea.Quit
+}
+
+func (m *Model) opts() search.Options {
+	return search.Options{CaseSensitive: m.caseSensitive}
 }

@@ -162,6 +162,45 @@ func TestUnicodeMovement(t *testing.T) {
 	}
 }
 
+func TestReplaceRange(t *testing.T) {
+	e := newEd("hello world")
+	e.Replace(6, 11, "there") // replace "world"
+	if got := string(e.Bytes()); got != "hello there" {
+		t.Fatalf("Bytes = %q, want %q", got, "hello there")
+	}
+	if e.CursorPos() != 11 { // 6 + len("there")
+		t.Errorf("cursor = %d, want 11", e.CursorPos())
+	}
+}
+
+func TestSetText(t *testing.T) {
+	e := newEd("original content")
+	e.LineEnd() // cursor near end
+	e.SetText("short")
+	if got := string(e.Bytes()); got != "short" {
+		t.Fatalf("Bytes = %q, want short", got)
+	}
+	if e.CursorPos() > 5 {
+		t.Errorf("cursor %d not clamped into new bounds", e.CursorPos())
+	}
+}
+
+func TestSetCursorAndMapping(t *testing.T) {
+	e := newEd("ab\ncde\nf")
+	e.SetCursor(5) // 'd' on line 1
+	if l, c := e.CursorLineCol(); l != 1 || c != 2 {
+		t.Fatalf("after SetCursor(5): (%d,%d), want (1,2)", l, c)
+	}
+	if got := e.LineStartPos(1); got != 3 {
+		t.Errorf("LineStartPos(1) = %d, want 3", got)
+	}
+	// Clamping to the end of the document (8 runes: "ab\ncde\nf").
+	e.SetCursor(9999)
+	if e.CursorPos() != 8 {
+		t.Errorf("SetCursor did not clamp: pos = %d, want 8", e.CursorPos())
+	}
+}
+
 func TestScrolling(t *testing.T) {
 	var sb []byte
 	for i := 0; i < 100; i++ {

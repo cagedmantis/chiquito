@@ -82,6 +82,25 @@ func (e *Editor) Line(n int) string { return e.buf.Line(n) }
 // CursorLineCol returns the cursor's zero-based line and rune column.
 func (e *Editor) CursorLineCol() (line, col int) { return e.idx.LineCol(e.pos) }
 
+// CursorPos returns the cursor as a rune index.
+func (e *Editor) CursorPos() int { return e.pos }
+
+// SetCursor moves the cursor to a rune index (clamped) and keeps it visible.
+func (e *Editor) SetCursor(pos int) {
+	e.pos = clamp(pos, 0, e.idx.Total())
+	e.syncGoal()
+	e.scrollToCursor()
+}
+
+// Text returns the whole document as a string.
+func (e *Editor) Text() string { return e.buf.String() }
+
+// LineStartPos returns the rune index at which line begins.
+func (e *Editor) LineStartPos(line int) int { return e.idx.Start(line) }
+
+// PosToLineCol converts a rune index to a zero-based line and column.
+func (e *Editor) PosToLineCol(pos int) (line, col int) { return e.idx.LineCol(pos) }
+
 // Top returns the first visible line index.
 func (e *Editor) Top() int { return e.top }
 
@@ -229,6 +248,35 @@ func (e *Editor) KillLine() {
 	}
 	e.dirty = true
 	e.reindex()
+	e.syncGoal()
+	e.scrollToCursor()
+}
+
+// Replace replaces the rune range [start, end) with text and places the cursor
+// just after the inserted text. The range is clamped to the document.
+func (e *Editor) Replace(start, end int, text string) {
+	start = clamp(start, 0, e.idx.Total())
+	end = clamp(end, start, e.idx.Total())
+	if end > start {
+		e.buf.Delete(start, end-start)
+	}
+	if text != "" {
+		e.buf.Insert(start, text)
+	}
+	e.pos = start + utf8.RuneCountInString(text)
+	e.dirty = true
+	e.reindex()
+	e.syncGoal()
+	e.scrollToCursor()
+}
+
+// SetText replaces the entire document, clamping the cursor into the new bounds.
+// Used by replace-all.
+func (e *Editor) SetText(s string) {
+	e.buf = buffer.New([]byte(s))
+	e.dirty = true
+	e.reindex()
+	e.pos = clamp(e.pos, 0, e.idx.Total())
 	e.syncGoal()
 	e.scrollToCursor()
 }

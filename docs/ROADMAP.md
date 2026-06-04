@@ -9,11 +9,11 @@ benchmarked before the next begins. See `docs/ARCHITECTURE.md` for the design.
 
 ## Current status
 
-- **Active phase:** Phase 3 (not started)
-- **Last completed:** Phase 2 — Bubble Tea TUI (editor core, UI adapter, Emacs nav, save/quit)
+- **Active phase:** Phase 4 (not started)
+- **Last completed:** Phase 3 — search/replace engine + syntax highlighting (Go, Markdown)
 - **Tree is green:** `go test -race ./...` passes; benchmarks run.
 - **Dependencies:** `bubbletea`, `lipgloss`, `go-runewidth` (direct). `bubbles`
-  not yet used (Phase 2 used a custom renderer); add it if a widget fits later.
+  not yet used; add it if a widget fits later.
 
 ---
 
@@ -68,17 +68,26 @@ TTY is present. (Interactive smoke test must be run by a human in a terminal.)
 
 ---
 
-## Phase 3 — Search, Replace & Syntax Highlighting ☐
+## Phase 3 — Search, Replace & Syntax Highlighting ✅ DONE
 
-- ☐ `internal/search`: forward/backward find; case-sensitivity toggle; exact
-  match now (regex optional later). Operate over buffer bytes/runes efficiently.
-- ☐ Find-and-replace (single + all), incremental search UI in `ui`.
-- ☐ `internal/syntax`: tokenizer engine + language definitions (start: Go,
-  Markdown). Tokenize only the visible viewport + a margin for latency; design
-  for incremental re-tokenization on edit.
-- ☐ Themes via `lipgloss` styles keyed by token type; honor `config.Theme`.
-- ☐ Benchmarks: search execution, tokenization throughput; unit tests for
-  matchers and each language's tokenizer.
+- ☑ `internal/search`: pure engine over strings, rune-index matches. `FindAll`,
+  `FindNext`/`FindPrev` (wrapping), `ReplaceAll`; case-sensitivity toggle via
+  Unicode folding. Tests + benchmarks (~0.4 ms/0.9 ms over 215 KB).
+- ☑ Incremental search UI (C-s start / next, C-r prev, C-t case toggle, Enter
+  accept, Esc cancel+restore) and a two-step replace-all prompt (alt+%), in
+  `internal/ui/search.go`. Live match highlight (current vs others).
+- ☑ `internal/syntax`: line-oriented tokenizer engine with carried `State`;
+  `Go` (keywords/strings/numbers/comments incl. multi-line block & raw strings)
+  and `Markdown` (headings, fences, inline code/emphasis/links); `Plain`
+  fallback; `ForFilename`. The UI caches per-line entering states (`enterStates`,
+  rebuilt once per edit, not per frame) → viewport-only tokenization per frame.
+- ☑ `internal/ui/theme.go`: token type → `lipgloss` style; honors
+  `config.Theme.Name` (only "default" defined; more in Phase 4).
+- ☑ Benchmarks for search and tokenization; unit tests for matchers and both
+  tokenizers (incl. cross-line state threading).
+
+**Deferred to Phase 5:** `search.FindAll` converts text to `[]rune` per call
+(~880 KB/alloc); fine now, optimize for big-file incremental search later.
 
 ---
 

@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"argc.dev/chiquito/internal/syntax"
 )
 
 var (
@@ -21,6 +23,7 @@ func (m *Model) View() string {
 	if m.quitting {
 		return ""
 	}
+	m.ensureSyntax()
 
 	var b strings.Builder
 	top := m.ed.Top()
@@ -39,12 +42,12 @@ func (m *Model) View() string {
 		if m.lineNumbers {
 			b.WriteString(gutterStyle.Render(fmt.Sprintf("%*d ", gutter-1, ln+1)))
 		}
-		isCursor := ln == curLine
+		content := m.ed.Line(ln)
 		col := -1
-		if isCursor {
+		if ln == curLine {
 			col = curCol
 		}
-		b.WriteString(m.renderRow(m.ed.Line(ln), col))
+		b.WriteString(m.renderRow(ln, content, col))
 		b.WriteByte('\n')
 	}
 
@@ -52,24 +55,80 @@ func (m *Model) View() string {
 	return b.String()
 }
 
+// ensureSyntax recomputes the per-line entering lexical states when the document
+// has changed. This is O(lines) but happens at most once per edit, not per
+// frame; tokens for the visible rows are derived from these cached states.
+func (m *Model) ensureSyntax() {
+	if !m.cfg.Features.SyntaxHighlighting || m.lang == nil {
+		return
+	}
+	if !m.synStale && len(m.enterStates) == m.ed.LineCount() {
+		return
+	}
+	n := m.ed.LineCount()
+	states := make([]syntax.State, n)
+	st := syntax.StateDefault
+	for i := 0; i < n; i++ {
+		states[i] = st
+		_, st = m.lang.TokenizeLine(m.ed.Line(i), st)
+	}
+	m.enterStates = states
+	m.synStale = false
+}
+
+// lineStyles builds a per-rune style slice for a line: syntax token colors,
+// overlaid with search-match highlights.
+func (m *Model) lineStyles(lineIdx int, runes []rune) []lipgloss.Style {
+	styles := make([]lipgloss.Style, len(runes))
+
+	if m.cfg.Features.SyntaxHighlighting && m.lang != nil && lineIdx < len(m.enterStates) {
+		tokens, _ := m.lang.TokenizeLine(string(runes), m.enterStates[lineIdx])
+		for _, tk := range tokens {
+			st := m.theme.style(tk.Type)
+			for i := tk.Start; i < tk.End && i < len(styles); i++ {
+				styles[i] = st
+			}
+		}
+	}
+
+	// Overlay search matches (only while a search prompt is active).
+	if m.mode == modeSearch && len(m.matches) > 0 {
+		lineStart := m.ed.LineStartPos(lineIdx)
+		for mi, mt := range m.matches {
+			s := mt.Start - lineStart
+			e := mt.End - lineStart
+			if e <= 0 || s >= len(styles) {
+				continue
+			}
+			hl := m.theme.searchMatch
+			if mi == m.matchIdx {
+				hl = m.theme.currentHit
+			}
+			for i := maxInt(0, s); i < minInt(len(styles), e); i++ {
+				styles[i] = hl
+			}
+		}
+	}
+	return styles
+}
+
 // renderRow renders one text line clipped to the horizontal window
-// [hscroll, hscroll+textWidth) in display columns. If cursorCol >= 0 the rune at
-// that column (or a trailing space) is drawn with the cursor style. Tabs are
-// expanded to the next tab stop; wide runes (CJK/emoji) advance by their display
-// width so the clip and cursor stay aligned.
-func (m *Model) renderRow(content string, cursorCol int) string {
+// [hscroll, hscroll+textWidth) in display columns, applying per-rune styles and
+// the cursor. Tabs expand to the next tab stop; wide runes advance by their
+// display width so the clip and cursor stay aligned.
+func (m *Model) renderRow(lineIdx int, content string, cursorCol int) string {
 	var sb strings.Builder
 	width := m.textWidth()
 	runes := []rune(content)
-	dispCol := 0 // display column of the next rune, from the start of the line
-	emitted := 0 // display columns already written within the window
+	styles := m.lineStyles(lineIdx, runes)
+	dispCol := 0
+	emitted := 0
 
 	for i, r := range runes {
 		w := runewidth.RuneWidth(r)
 		if r == '\t' {
 			w = m.tabWidth - (dispCol % m.tabWidth)
 		}
-		// Skip runes scrolled off to the left.
 		if dispCol+w <= m.hscroll {
 			dispCol += w
 			continue
@@ -81,16 +140,15 @@ func (m *Model) renderRow(content string, cursorCol int) string {
 		if r == '\t' {
 			cell = strings.Repeat(" ", w)
 		}
+		style := styles[i]
 		if i == cursorCol {
-			sb.WriteString(cursorStyle.Render(cell))
-		} else {
-			sb.WriteString(cell)
+			style = style.Reverse(true)
 		}
+		sb.WriteString(style.Render(cell))
 		dispCol += w
 		emitted += w
 	}
 
-	// Cursor sitting at end-of-line: draw it as a reversed space.
 	if cursorCol >= len(runes) && cursorCol >= 0 && emitted < width {
 		sb.WriteString(cursorStyle.Render(" "))
 	}
@@ -98,6 +156,11 @@ func (m *Model) renderRow(content string, cursorCol int) string {
 }
 
 func (m *Model) statusBar() string {
+	// An active prompt takes over the status line.
+	if prompt := m.prompt(); prompt != "" {
+		return statusStyle.Render(m.padTo(prompt, m.width))
+	}
+
 	name := m.ed.Name()
 	if name == "" {
 		name = "[scratch]"
@@ -112,11 +175,10 @@ func (m *Model) statusBar() string {
 	if m.status != "" {
 		left += "| " + m.status + " "
 	}
-	right := fmt.Sprintf(" %d:%d ", line+1, col+1)
+	right := fmt.Sprintf(" %s  %d:%d ", m.lang.Name(), line+1, col+1)
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
-		// Truncate the left side so the position indicator always fits.
 		max := m.width - lipgloss.Width(right)
 		if max < 0 {
 			max = 0
@@ -130,10 +192,38 @@ func (m *Model) statusBar() string {
 	return statusStyle.Render(left + strings.Repeat(" ", gap) + right)
 }
 
+// prompt returns the minibuffer prompt text for the active mode, or "".
+func (m *Model) prompt() string {
+	cs := "i"
+	if m.caseSensitive {
+		cs = "C"
+	}
+	switch m.mode {
+	case modeSearch:
+		count := ""
+		if len(m.matches) > 0 {
+			count = fmt.Sprintf(" (%d/%d)", m.matchIdx+1, len(m.matches))
+		} else if m.query != "" {
+			count = " (no matches)"
+		}
+		return fmt.Sprintf(" I-search[%s]: %s%s", cs, m.query, count)
+	case modeReplaceFrom:
+		return fmt.Sprintf(" Replace[%s]: %s", cs, m.query)
+	case modeReplaceTo:
+		return fmt.Sprintf(" Replace %q with: %s", m.query, m.replaceWith)
+	}
+	return ""
+}
+
+func (m *Model) padTo(s string, width int) string {
+	if w := lipgloss.Width(s); w < width {
+		return s + strings.Repeat(" ", width-w)
+	}
+	return runewidth.Truncate(s, width, "…")
+}
+
 // --- layout helpers --------------------------------------------------------
 
-// gutterWidth returns the width of the line-number column (including its
-// trailing space), or 0 when line numbers are disabled.
 func (m *Model) gutterWidth() int {
 	if !m.lineNumbers {
 		return 0
@@ -141,7 +231,6 @@ func (m *Model) gutterWidth() int {
 	return len(strconv.Itoa(m.ed.LineCount())) + 1
 }
 
-// textWidth is the number of columns available for text, after the gutter.
 func (m *Model) textWidth() int {
 	w := m.width - m.gutterWidth()
 	if w < 1 {
@@ -150,8 +239,6 @@ func (m *Model) textWidth() int {
 	return w
 }
 
-// textHeight is the number of rows available for text, reserving one row for
-// the status bar.
 func (m *Model) textHeight() int {
 	h := m.height - 1
 	if h < 1 {
@@ -160,8 +247,6 @@ func (m *Model) textHeight() int {
 	return h
 }
 
-// syncHScroll adjusts the horizontal scroll so the cursor's display column stays
-// within the visible window.
 func (m *Model) syncHScroll() {
 	line, col := m.ed.CursorLineCol()
 	target := displayCol(m.ed.Line(line), col, m.tabWidth)
@@ -177,8 +262,6 @@ func (m *Model) syncHScroll() {
 	}
 }
 
-// displayCol returns the display column at rune offset col within line, honoring
-// tab stops and wide runes.
 func displayCol(line string, col, tabWidth int) int {
 	dc := 0
 	for i, r := range []rune(line) {
@@ -192,4 +275,18 @@ func displayCol(line string, col, tabWidth int) int {
 		}
 	}
 	return dc
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
