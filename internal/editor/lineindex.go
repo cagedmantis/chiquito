@@ -2,7 +2,6 @@ package editor
 
 import (
 	"sort"
-	"unicode/utf8"
 
 	"argc.dev/chiquito/internal/buffer"
 )
@@ -19,21 +18,11 @@ type LineIndex struct {
 	total  int   // total rune count
 }
 
-// BuildLineIndex scans b once and records the start of every line.
+// BuildLineIndex records the start of every line by walking the buffer's piece
+// table (without copying the whole document).
 func BuildLineIndex(b *buffer.Buffer) *LineIndex {
-	data := b.Bytes()
-	li := &LineIndex{starts: make([]int, 1, 1+b.LineCount())}
-	r := 0
-	for off := 0; off < len(data); {
-		c, size := utf8.DecodeRune(data[off:])
-		off += size
-		r++
-		if c == '\n' {
-			li.starts = append(li.starts, r)
-		}
-	}
-	li.total = r
-	return li
+	starts, total := b.LineStartRunes(make([]int, 0, b.LineCount()))
+	return &LineIndex{starts: starts, total: total}
 }
 
 // Count returns the number of lines (always >= 1).

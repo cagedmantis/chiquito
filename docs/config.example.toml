@@ -1,0 +1,45 @@
+# chiquito configuration (TOML).
+#
+# This file is created with these defaults on first run at:
+#   ~/.config/chiquito/config.toml                       (Linux/BSD)
+#   ~/Library/Application Support/chiquito/config.toml   (macOS)
+#
+# Every field is optional: anything omitted keeps its built-in default, and the
+# [keybindings.bindings] table is merged over the defaults, so you only need to
+# list the bindings you want to change. Edits are hot-reloaded while running.
+
+[editor]
+tab_width = 4        # columns per tab stop
+expand_tabs = true   # insert spaces instead of a literal tab
+line_numbers = true  # show the line-number gutter
+wrap_lines = false   # (reserved) soft-wrap long lines
+
+[theme]
+name = "default"     # color theme (only "default" ships today)
+
+[features]
+syntax_highlighting = true  # color Go and Markdown
+spell_check = true          # asynchronous spell checking
+auto_save = false           # (reserved)
+
+[spell]
+enabled = true
+language = "en_US"
+
+# Keybindings map an action to a key chord. Chords accept either Emacs notation
+# ("C-x C-s", "M-%") or Bubble Tea notation ("ctrl+x ctrl+s", "alt+%");
+# space-separated keys form a multi-key sequence.
+[keybindings.bindings]
+cursor-forward  = "ctrl+f"
+cursor-backward = "ctrl+b"
+cursor-up       = "ctrl+p"
+cursor-down     = "ctrl+n"
+line-start      = "ctrl+a"
+line-end        = "ctrl+e"
+delete-forward  = "ctrl+d"
+kill-line       = "ctrl+k"
+search          = "ctrl+s"
+replace         = "alt+%"
+save            = "ctrl+x ctrl+s"
+open            = "ctrl+x ctrl+f"
+quit            = "ctrl+x ctrl+c"

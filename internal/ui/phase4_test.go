@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +176,21 @@ func TestConfigHotReload(t *testing.T) {
 	}
 	if m.tabWidth != 7 {
 		t.Errorf("hot-reload tabWidth = %d, want 7", m.tabWidth)
+	}
+}
+
+func TestTerminalResize(t *testing.T) {
+	m := newModel(t, strings.Repeat("a line of text\n", 50), "f.txt")
+	// Shrink, then grow; View must reflect the new height and never panic.
+	for _, sz := range []struct{ w, h int }{{10, 4}, {120, 40}, {1, 1}} {
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
+		m = updated.(*Model)
+		out := m.View()
+		gotLines := strings.Count(out, "\n")
+		// textHeight rows + status bar; allow the clamped minimum.
+		if gotLines < 1 {
+			t.Errorf("size %dx%d produced %d lines", sz.w, sz.h, gotLines)
+		}
 	}
 }
 

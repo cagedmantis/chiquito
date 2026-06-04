@@ -3,6 +3,7 @@
 package fileio
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,10 @@ func Read(name string) ([]byte, error) {
 // keeping the symlink intact (the conventional editor behaviour). Existing file
 // permissions are preserved; newly created files are mode 0600.
 func WriteAtomic(name string, data []byte) (err error) {
+	if name == "" {
+		return errors.New("fileio: empty file name")
+	}
+
 	// Resolve symlinks so we replace the real file rather than clobbering the
 	// link. EvalSymlinks fails for a not-yet-existing file; in that case we
 	// keep the original name.
@@ -66,6 +71,12 @@ func WriteAtomic(name string, data []byte) (err error) {
 
 	perm := os.FileMode(0o600)
 	if info, serr := os.Stat(target); serr == nil {
+		// Refuse to overwrite anything that is not a regular file (a directory,
+		// device, FIFO, or socket — possibly reached through a symlink). This
+		// keeps a stray save from corrupting special files.
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("fileio: refusing to overwrite non-regular file %q (%s)", target, info.Mode().Type())
+		}
 		perm = info.Mode().Perm()
 	}
 

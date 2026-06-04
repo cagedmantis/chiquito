@@ -239,3 +239,37 @@ func (b *Buffer) RuneAt(idx int) (rune, bool) {
 
 // numPieces reports the number of pieces; used by tests and benchmarks.
 func (b *Buffer) numPieces() int { return len(b.pieces) }
+
+// LineStartRunes appends the rune index of the start of every line to dst[:0]
+// and returns the result along with the total rune count. The first line starts
+// at rune 0; each later entry is the rune index immediately after a '\n'.
+//
+// Unlike scanning Bytes(), this walks the piece table without materialising the
+// whole document: pieces with no newlines contribute their cached rune count in
+// O(1), and pieces with newlines are scanned with the optimized bytes.IndexByte
+// and utf8.RuneCount routines rather than rune-by-rune decoding. The editor uses
+// this to rebuild its line index after each edit.
+func (b *Buffer) LineStartRunes(dst []int) ([]int, int) {
+	dst = append(dst[:0], 0) // line 0 begins at rune 0
+	r := 0
+	for _, p := range b.pieces {
+		data := b.pieceBytes(p)
+		if p.newlines == 0 {
+			r += p.runes // fast path: no decoding needed
+			continue
+		}
+		start := 0
+		for {
+			i := bytes.IndexByte(data[start:], '\n')
+			if i < 0 {
+				r += utf8.RuneCount(data[start:])
+				break
+			}
+			nl := start + i
+			r += utf8.RuneCount(data[start:nl]) + 1 // + the newline rune itself
+			dst = append(dst, r)
+			start = nl + 1
+		}
+	}
+	return dst, r
+}

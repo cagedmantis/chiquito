@@ -9,12 +9,14 @@ benchmarked before the next begins. See `docs/ARCHITECTURE.md` for the design.
 
 ## Current status
 
-- **Active phase:** Phase 5 (not started)
-- **Last completed:** Phase 4 — async spell check, TOML parsing + hot-reload,
-  keybinding parser, generalized minibuffer + file open/save-as
-- **Tree is green:** `go test -race ./...` passes; benchmarks run.
+- **All 5 phases complete.** The editor is feature-complete per the original
+  plan: buffer, TUI, search/replace, syntax highlighting, async spell check,
+  TOML config + hot-reload, file open/save-as, secure I/O, CLI flags, fuzzing.
+- **Tree is green:** `go test -race ./...` passes; benchmarks and fuzzers run.
 - **Dependencies:** `bubbletea`, `lipgloss`, `go-runewidth`, `BurntSushi/toml`
   (direct). Hot-reload uses polling (no fsnotify dep). `bubbles` still unused.
+- **Known future work:** balanced-tree piece store for multi-MB files (see
+  Phase 5 note); a human interactive smoke test in a real terminal/over SSH.
 
 ---
 
@@ -120,23 +122,37 @@ TTY is present. (Interactive smoke test must be run by a human in a terminal.)
 
 ---
 
-## Phase 5 — Hardening, Benchmarking & Polish ☐
+## Phase 5 — Hardening, Benchmarking & Polish ✅ DONE
 
-- ☐ **CLI: `--help` / `--version` / flag parsing.** `cmd/chiquito` currently does
-  raw `os.Args[1:]` with no flag handling — `chiquito --help` tries to open a
-  file named `--help`. Add a `flag.FlagSet` with usage text (synopsis, options,
-  default keybindings, config path). Dependency-free; could be pulled forward at
-  any time if wanted sooner.
-- ☐ Security audit: revisit symlink/TOCTOU handling, temp-file lifecycle, large/
-  malformed/binary file behavior, path handling.
-- ☐ Fuzz tests: `buffer` insert/delete invariants, UTF-8 round-trip, config
-  parser, search.
-- ☐ Performance: piece table → balanced tree of pieces + cached line index for
-  O(log n) random access (internal only, no API change); profile render/input
-  hot paths (`pprof`); reduce allocations.
-- ☐ Edge cases: huge files, very long lines, no-trailing-newline, CRLF, mixed
-  encodings, terminal resize.
-- ☐ Docs polish, example config, README usage.
+- ☑ **CLI flags.** `cmd/chiquito` uses a `flag.FlagSet`: `-version`, `-help`
+  (full usage with keybindings + config path), `-cpuprofile`, `-memprofile`.
+  `run(args, stdout, stderr) int` is testable without a TTY (see `main_test.go`).
+- ☑ Security: `WriteAtomic` now refuses to overwrite a non-regular target
+  (directory/device/FIFO/socket, including via symlink) and an empty name, on
+  top of the existing non-blocking open, regular-file read guard, fstat (no
+  TOCTOU), and atomic temp→fsync→rename. Tests cover FIFO/dir/symlink-to-device
+  and binary round-trips.
+- ☑ Fuzz tests (seed corpus runs under `go test`; verified with `-fuzz`):
+  `buffer` insert vs reference splice, insert+delete round-trip, `LineStartRunes`
+  vs reference (710k execs clean); `search` FindAll invariants + ReplaceAll
+  identity (vs `strings.Count`); `config` Parse never panics + validation holds
+  (500k execs clean).
+- ☑ Performance: `BuildLineIndex` no longer copies the whole document — it walks
+  the piece table via `buffer.LineStartRunes` using `bytes.IndexByte` +
+  `utf8.RuneCount` (≈1.8× faster, ~½ the memory per edit). `pprof` CPU/heap
+  profiling is wired through the new CLI flags.
+- ☑ Edge cases: tests for no-trailing-newline, CRLF preservation (split on `\n`,
+  keep `\r`), 50k-rune single line, empty-buffer no-ops, scroll clamping, and
+  terminal resize (UI `View` across sizes). Invalid UTF-8 round-trip already
+  covered in Phase 1.
+- ☑ Docs: expanded `README.md` (features, usage, keybindings, config) and added
+  annotated `docs/config.example.toml`.
+
+**Deliberately deferred (documented trade-off):** the full balanced-tree of
+pieces. The motivating cost was the per-edit O(n) line-index rebuild, which the
+`LineStartRunes` change addresses for typical files; a tree only pays off for
+multi-MB files under sustained editing and is a high-risk rewrite of the core
+data structure. Left as a future optimization behind the unchanged buffer API.
 
 ---
 

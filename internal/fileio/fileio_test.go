@@ -1,6 +1,7 @@
 package fileio
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -123,6 +124,62 @@ func TestWriteAtomicThroughSymlink(t *testing.T) {
 	got, _ := os.ReadFile(realPath)
 	if string(got) != "updated" {
 		t.Errorf("target contents = %q, want updated", got)
+	}
+}
+
+func TestWriteAtomicRejectsEmptyName(t *testing.T) {
+	if err := WriteAtomic("", []byte("x")); err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+func TestWriteAtomicRefusesDirectory(t *testing.T) {
+	if err := WriteAtomic(t.TempDir(), []byte("x")); err == nil {
+		t.Error("expected error writing over a directory")
+	}
+}
+
+func TestWriteAtomicRefusesFIFO(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no FIFOs on Windows")
+	}
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "pipe")
+	if err := mkfifo(fifo); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+	if err := WriteAtomic(fifo, []byte("x")); err == nil {
+		t.Error("expected error writing over a FIFO")
+	}
+}
+
+func TestWriteAtomicRefusesSymlinkToDevice(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks/devices differ on Windows")
+	}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "dev")
+	if err := os.Symlink("/dev/null", link); err != nil {
+		t.Skipf("cannot symlink to /dev/null: %v", err)
+	}
+	if err := WriteAtomic(link, []byte("x")); err == nil {
+		t.Error("expected error writing through a symlink to a device")
+	}
+}
+
+func TestReadWriteBinary(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bin")
+	data := []byte{0x00, 0x01, 0xff, '\n', 0x00, 'A'}
+	if err := WriteAtomic(p, data); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Errorf("binary round trip = %v, want %v", got, data)
 	}
 }
 
