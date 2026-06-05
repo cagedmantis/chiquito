@@ -34,6 +34,9 @@ type FeatureConfig struct {
 	SyntaxHighlighting bool `toml:"syntax_highlighting"`
 	SpellCheck         bool `toml:"spell_check"`
 	AutoSave           bool `toml:"auto_save"`
+	// FilePane shows a selectable file browser pane for "open file" instead of a
+	// plain text path prompt.
+	FilePane bool `toml:"file_pane"`
 }
 
 // SpellConfig configures the asynchronous spell checker (Phase 4).
@@ -63,6 +66,7 @@ func Default() Config {
 			SyntaxHighlighting: true,
 			SpellCheck:         true,
 			AutoSave:           false,
+			FilePane:           true,
 		},
 		Spell: SpellConfig{
 			Enabled:  true,

@@ -53,6 +53,11 @@ func (m *Model) View() string {
 		b.WriteByte('\n')
 	}
 
+	if ph := m.paneHeight(); ph > 0 {
+		b.WriteString(m.activePane.view(m.width, ph))
+		b.WriteByte('\n')
+	}
+
 	b.WriteString(m.statusBar())
 	return b.String()
 }
@@ -261,9 +266,25 @@ func (m *Model) textWidth() int {
 }
 
 func (m *Model) textHeight() int {
-	h := m.height - 1
+	h := m.height - 1 - m.paneHeight() // status bar + any open pane
 	if h < 1 {
 		return 1
+	}
+	return h
+}
+
+// paneHeight is the number of rows reserved for an open pane, clamped so at
+// least one editor row and the status bar remain.
+func (m *Model) paneHeight() int {
+	if m.activePane == nil {
+		return 0
+	}
+	h := m.activePane.preferredHeight()
+	if max := m.height - 2; h > max {
+		h = max
+	}
+	if h < 1 {
+		h = 1
 	}
 	return h
 }

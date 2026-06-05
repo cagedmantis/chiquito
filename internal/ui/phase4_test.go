@@ -29,6 +29,7 @@ func TestOpenFileFlow(t *testing.T) {
 	}
 
 	m := newModel(t, "scratch", "")
+	m.cfg.Features.FilePane = false // exercise the text-prompt path
 	// C-x C-f opens the file-open prompt.
 	m, _ = send(m, ctrl(tea.KeyCtrlX))
 	m, _ = send(m, ctrl(tea.KeyCtrlF))
@@ -56,6 +57,7 @@ func TestOpenMissingFileOpensEmptyBuffer(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new.txt")
 	m := newModel(t, "", "")
+	m.cfg.Features.FilePane = false // exercise the text-prompt path
 	m, _ = send(m, ctrl(tea.KeyCtrlX))
 	m, _ = send(m, ctrl(tea.KeyCtrlF))
 	m = typeString(m, path)

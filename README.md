@@ -9,6 +9,8 @@ Optimized for SSH and local terminals; Unicode/UTF-8 throughout.
 - **Piece-table buffer** — original file bytes are never copied; low memory,
   fast edits, full Unicode.
 - **Emacs-style keybindings**, fully customizable (Emacs or Bubble Tea notation).
+- **File-browser pane** — `C-x C-f` opens a selectable list of the current
+  directory's files and folders (navigate, enter directories, open files).
 - **Incremental search** and **query-replace** with a case-sensitivity toggle.
 - **Syntax highlighting** for Go and Markdown (viewport-only, incremental).
 - **Asynchronous spell checking** that never blocks typing.
@@ -47,6 +49,13 @@ chiquito [flags] [file]      # open a file, or a scratch buffer with no argument
 | `C-k` | kill to end of line | | `C-x C-f` | open file |
 | arrows / Home / End / PgUp / PgDn | navigate | | `C-x C-s` | save (prompts if unnamed) |
 | `Esc` / `C-g` | cancel a prompt | | `C-x C-c` | quit |
+
+With `file_pane` enabled (the default), `C-x C-f` opens a **file-browser pane**
+in the bottom rows: `↑`/`↓` (or `C-p`/`C-n`) to move, `Enter` to open a file or
+enter a directory, `⌫`/`←` to go up, `Esc` to cancel. With `file_pane = false`
+it falls back to a text path prompt prefilled with a starting directory (the
+current file's directory, else the working directory, else home); there, as in
+Emacs, typing `//` resets to the filesystem root and `/~` resets to home.
 
 ## Configuration
 

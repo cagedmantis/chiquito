@@ -21,6 +21,8 @@ name = "default"     # color theme (only "default" ships today)
 syntax_highlighting = true  # color Go and Markdown
 spell_check = true          # asynchronous spell checking
 auto_save = false           # (reserved)
+file_pane = true            # "open file" shows a selectable browser pane
+                            # (set false to use a plain text path prompt)
 
 [spell]
 enabled = true

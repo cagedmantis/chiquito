@@ -78,6 +78,9 @@ type Model struct {
 
 	// config hot-reload state
 	configMod time.Time
+
+	// activePane is a bottom mini-window capturing input when non-nil.
+	activePane pane
 }
 
 // New constructs a Model for the given editor and configuration.
@@ -107,10 +110,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyLayout()
 		return m, nil
 	case tea.KeyMsg:
+		if m.activePane != nil {
+			outcome, cmd := m.activePane.update(msg)
+			if outcome == paneClose {
+				m.activePane = nil
+				m.applyLayout()
+			}
+			return m, cmd
+		}
 		if m.mode != modeNormal {
 			return m.handleMinibuffer(msg)
 		}
 		return m.handleKey(msg)
+	case openFileMsg:
+		cmd := m.loadFile(msg.path)
+		m.applyLayout()
+		return m, cmd
 	case dictLoadedMsg:
 		m.checker = msg.dict
 		return m, m.runSpellCmd(m.docVersion)
