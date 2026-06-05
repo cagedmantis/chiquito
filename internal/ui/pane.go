@@ -37,8 +37,7 @@ const filePaneHeight = 10
 
 var (
 	paneHeaderStyle = lipgloss.NewStyle().Reverse(true).Bold(true)
-	paneSelStyle    = lipgloss.NewStyle().Reverse(true)
-	paneDirStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	paneMatchColor  = lipgloss.Color("11") // matched-character highlight
 )
 
 // openFileMsg is emitted by the file pane when the user selects a file to open.
@@ -266,25 +265,66 @@ func (p *filePane) view(width, height int) string {
 
 	for i := 0; i < rows; i++ {
 		mi := p.top + i
-		switch {
-		case mi >= len(p.matches):
+		if mi >= len(p.matches) {
 			b.WriteString(fitWidth("", width))
-		default:
+		} else {
 			e := p.entries[p.matches[mi]]
-			switch {
-			case mi == p.selected:
-				b.WriteString(paneSelStyle.Render(fitWidth("> "+e.label, width)))
-			case e.isDir:
-				b.WriteString(paneDirStyle.Render(fitWidth("  "+e.label, width)))
-			default:
-				b.WriteString(fitWidth("  "+e.label, width))
+			var positions []int
+			if p.filter != "" {
+				_, positions, _ = fuzzy.MatchPositions(p.filter, strings.TrimSuffix(e.label, "/"))
 			}
+			b.WriteString(p.renderEntry(e, mi == p.selected, positions, width))
 		}
 		if i < rows-1 {
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
+}
+
+// renderEntry renders one entry row to exactly width columns, bolding the runes
+// matched by the fuzzy filter. positions index into the label (without any
+// trailing "/").
+func (p *filePane) renderEntry(e fileEntry, selected bool, positions []int, width int) string {
+	const prefixLen = 2 // "> " or "  "
+	prefix := "  "
+	if selected {
+		prefix = "> "
+	}
+	matched := make(map[int]bool, len(positions))
+	for _, pos := range positions {
+		matched[pos+prefixLen] = true
+	}
+
+	runes := []rune(prefix + e.label)
+	var b strings.Builder
+	used := 0
+	for i, r := range runes {
+		w := runewidth.RuneWidth(r)
+		if used+w > width {
+			break
+		}
+		b.WriteString(p.cellStyle(e, selected, matched[i]).Render(string(r)))
+		used += w
+	}
+	if used < width {
+		b.WriteString(p.cellStyle(e, selected, false).Render(strings.Repeat(" ", width-used)))
+	}
+	return b.String()
+}
+
+func (p *filePane) cellStyle(e fileEntry, selected, isMatch bool) lipgloss.Style {
+	st := lipgloss.NewStyle()
+	if e.isDir {
+		st = st.Foreground(lipgloss.Color("12")).Bold(true)
+	}
+	if isMatch {
+		st = st.Foreground(paneMatchColor).Bold(true).Underline(true)
+	}
+	if selected {
+		st = st.Reverse(true)
+	}
+	return st
 }
 
 // fitWidth pads s with spaces or truncates it to exactly width display columns.

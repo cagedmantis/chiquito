@@ -48,8 +48,8 @@ func TestOpenFileFlow(t *testing.T) {
 	if m.ed.Name() != path {
 		t.Errorf("name = %q, want %q", m.ed.Name(), path)
 	}
-	if m.lang.Name() != "go" {
-		t.Errorf("language = %q, want go (re-selected on open)", m.lang.Name())
+	if m.langName() != "go" {
+		t.Errorf("language = %q, want go (re-selected on open)", m.langName())
 	}
 }
 
@@ -87,8 +87,8 @@ func TestSaveAsFlow(t *testing.T) {
 	if m.ed.Name() != path {
 		t.Errorf("name = %q, want %q", m.ed.Name(), path)
 	}
-	if m.lang.Name() != "markdown" {
-		t.Errorf("language = %q, want markdown", m.lang.Name())
+	if m.langName() != "markdown" {
+		t.Errorf("language = %q, want markdown", m.langName())
 	}
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != "# Title" {

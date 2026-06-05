@@ -15,7 +15,9 @@ line_numbers = true  # show the line-number gutter
 wrap_lines = false   # (reserved) soft-wrap long lines
 
 [theme]
-name = "default"     # color theme (only "default" ships today)
+name = "default"     # syntax color theme; "default" uses Monokai. Any Chroma
+                     # style name works, e.g. "github", "dracula", "monokai",
+                     # "solarized-dark", "nord".
 
 [features]
 syntax_highlighting = true  # color Go and Markdown

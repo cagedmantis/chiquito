@@ -156,6 +156,22 @@ data structure. Left as a future optimization behind the unchanged buffer API.
 
 ---
 
+## Beyond the 5 phases — feature work
+
+Incremental features added after the phased build (all tested, tree green):
+
+- ☑ Open/save prompts prefill a starting directory; Emacs `//`/`~` path resets.
+- ☑ **File-browser pane** (`Features.FilePane`): a reusable bottom `pane`
+  interface; the file pane lists/navigates directories and opens files.
+- ☑ **Fuzzy type-to-filter** in the pane via `internal/fuzzy` — upgraded to an
+  fzf-style Smith-Waterman DP (`MatchPositions`) with **matched-character
+  highlighting** in the pane rows.
+- ☑ **Chroma syntax highlighting** (`ui/highlight.go`): ~250 languages + themes
+  via `config.Theme.Name`, with `internal/syntax` as fallback.
+
+Possible next features: per-pane reuse for a buffer switcher / command palette;
+tab-completion in the text prompts; comment/string-only spell checking.
+
 ## How to resume
 
 1. `go build ./... && go vet ./... && go test -race ./...` to confirm green.

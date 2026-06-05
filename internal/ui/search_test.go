@@ -1,14 +1,12 @@
 package ui
 
 import (
-	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"argc.dev/chiquito/internal/config"
 	"argc.dev/chiquito/internal/editor"
-	"argc.dev/chiquito/internal/syntax"
 )
 
 func altRune(s string) tea.KeyMsg {
@@ -135,26 +133,28 @@ func TestSyntaxEnterStatesThreadAcrossLines(t *testing.T) {
 	m = updated.(*Model)
 	_ = m.View() // triggers ensureSyntax
 
-	want := []syntax.State{
-		syntax.StateDefault,      // line 0: package main
-		syntax.StateDefault,      // line 1: /* block   (enters comment at end)
-		syntax.StateBlockComment, // line 2: comment */ (was inside comment)
-		syntax.StateDefault,      // line 3: var x = 1
+	// Chroma should produce one span list per line, covering all 4 lines.
+	if got := len(m.hl.lineSpans); got < 4 {
+		t.Fatalf("lineSpans = %d, want >= 4", got)
 	}
-	if !reflect.DeepEqual(m.enterStates, want) {
-		t.Errorf("enterStates = %v, want %v", m.enterStates, want)
+	// The comment block (lines 1–2) should be highlighted (non-empty spans).
+	if len(m.hl.spansFor(1)) == 0 {
+		t.Error("expected highlighted spans on the comment line")
+	}
+	if m.langName() != "go" {
+		t.Errorf("langName = %q, want go", m.langName())
 	}
 }
 
-func TestSyntaxDisabledNoStates(t *testing.T) {
+func TestSyntaxDisabledNoSpans(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.SyntaxHighlighting = false
 	m := New(editor.New([]byte("package main"), "main.go"), cfg)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	m = updated.(*Model)
 	_ = m.View()
-	if len(m.enterStates) != 0 {
-		t.Errorf("enterStates should be empty when highlighting disabled, got %d", len(m.enterStates))
+	if len(m.hl.lineSpans) != 0 {
+		t.Errorf("no spans expected when highlighting disabled, got %d", len(m.hl.lineSpans))
 	}
 }
 

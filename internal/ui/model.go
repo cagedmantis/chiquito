@@ -18,7 +18,6 @@ import (
 	"argc.dev/chiquito/internal/fileio"
 	"argc.dev/chiquito/internal/search"
 	"argc.dev/chiquito/internal/spell"
-	"argc.dev/chiquito/internal/syntax"
 )
 
 // mode is the model's input mode: normal editing or an active minibuffer prompt.
@@ -66,10 +65,9 @@ type Model struct {
 	searchOrigin  int
 
 	// syntax highlighting state
-	lang        syntax.Language
-	theme       theme
-	enterStates []syntax.State
-	synStale    bool
+	hl       *highlighter
+	theme    theme
+	synStale bool
 
 	// spell checking state
 	checker    spell.Dictionary
@@ -87,6 +85,7 @@ type Model struct {
 func New(ed *editor.Editor, cfg config.Config) *Model {
 	ed.SetTabStops(cfg.Editor.TabWidth, cfg.Editor.ExpandTabs)
 	mt, _ := config.ModTime()
+	th := themeByName(cfg.Theme.Name)
 	return &Model{
 		ed:          ed,
 		km:          newKeymap(cfg),
@@ -95,8 +94,8 @@ func New(ed *editor.Editor, cfg config.Config) *Model {
 		lineNumbers: cfg.Editor.LineNumbers,
 		width:       80,
 		height:      24,
-		lang:        syntax.ForFilename(ed.Name()),
-		theme:       themeByName(cfg.Theme.Name),
+		theme:       th,
+		hl:          newHighlighter(ed.Name(), cfg.Theme.Name, th),
 		synStale:    true,
 		configMod:   mt,
 	}

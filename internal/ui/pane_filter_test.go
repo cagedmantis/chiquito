@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func typePane(p *filePane, s string) {
@@ -105,6 +106,43 @@ func TestFilePaneFilterShownInView(t *testing.T) {
 	out := p.view(120, filePaneHeight)
 	if !strings.Contains(out, "filter: be") {
 		t.Errorf("view should show the active filter:\n%s", out)
+	}
+}
+
+func TestFilePaneMatchHighlightStyle(t *testing.T) {
+	p := &filePane{}
+	file := fileEntry{label: "beta.go", isDir: false}
+
+	// A matched character is bold, underlined, and uses the match color.
+	m := p.cellStyle(file, false, true)
+	if c, ok := m.GetForeground().(lipgloss.Color); !ok || c != paneMatchColor {
+		t.Errorf("matched fg = %#v, want %v", m.GetForeground(), paneMatchColor)
+	}
+	if !m.GetBold() || !m.GetUnderline() {
+		t.Error("matched cell should be bold + underlined")
+	}
+
+	// A non-matched file character has no special foreground.
+	n := p.cellStyle(file, false, false)
+	if _, ok := n.GetForeground().(lipgloss.Color); ok {
+		t.Error("non-matched file cell should have no foreground color")
+	}
+
+	// Directories are colored; selection adds reverse video.
+	d := p.cellStyle(fileEntry{label: "sub/", isDir: true}, false, false)
+	if _, ok := d.GetForeground().(lipgloss.Color); !ok {
+		t.Error("directory cell should be colored")
+	}
+	if !p.cellStyle(file, true, false).GetReverse() {
+		t.Error("selected cell should be reverse-video")
+	}
+}
+
+func TestFilePaneRenderEntryWidth(t *testing.T) {
+	p := &filePane{}
+	row := p.renderEntry(fileEntry{label: "beta.go"}, false, []int{0, 1}, 30)
+	if w := lipgloss.Width(row); w != 30 {
+		t.Errorf("rendered row width = %d, want 30", w)
 	}
 }
 

@@ -74,6 +74,46 @@ func TestRankEmptyQueryKeepsOrder(t *testing.T) {
 	}
 }
 
+func TestMatchPositions(t *testing.T) {
+	cases := []struct {
+		query, cand string
+		want        []int
+	}{
+		{"go", "main.go", []int{5, 6}},   // the "go" after the dot
+		{"mn", "main.go", []int{0, 3}},   // m...n
+		{"abc", "aXbYc", []int{0, 2, 4}}, // subsequence
+		{"", "anything", nil},            // empty query → no positions
+	}
+	for _, c := range cases {
+		_, pos, ok := MatchPositions(c.query, c.cand)
+		if !ok && c.query != "" {
+			t.Errorf("MatchPositions(%q, %q) did not match", c.query, c.cand)
+			continue
+		}
+		if len(pos) != len(c.want) {
+			t.Errorf("MatchPositions(%q, %q) = %v, want %v", c.query, c.cand, pos, c.want)
+			continue
+		}
+		for i := range c.want {
+			if pos[i] != c.want[i] {
+				t.Errorf("MatchPositions(%q, %q) = %v, want %v", c.query, c.cand, pos, c.want)
+				break
+			}
+		}
+	}
+}
+
+func TestMatchPositionsPrefersBoundary(t *testing.T) {
+	// "ml" should match the boundary 'm' and 'l' (main_lib), not the earlier 'm'.
+	_, pos, ok := MatchPositions("ml", "main_lib.go")
+	if !ok || len(pos) != 2 {
+		t.Fatalf("got pos=%v ok=%v", pos, ok)
+	}
+	if pos[0] != 0 || pos[1] != 5 { // 'm' at 0, 'l' at 5 (after '_')
+		t.Errorf("positions = %v, want [0 5]", pos)
+	}
+}
+
 func FuzzMatch(f *testing.F) {
 	f.Add("main", "main.go")
 	f.Add("", "x")

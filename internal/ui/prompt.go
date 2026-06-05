@@ -10,7 +10,6 @@ import (
 
 	"argc.dev/chiquito/internal/editor"
 	"argc.dev/chiquito/internal/fileio"
-	"argc.dev/chiquito/internal/syntax"
 )
 
 // lineInput is a minimal single-line text field used by the minibuffer prompts
@@ -166,7 +165,7 @@ func (m *Model) loadFile(path string) tea.Cmd {
 	}
 	m.ed = editor.New(data, path)
 	m.ed.SetTabStops(m.cfg.Editor.TabWidth, m.cfg.Editor.ExpandTabs)
-	m.lang = syntax.ForFilename(path)
+	m.hl = newHighlighter(path, m.cfg.Theme.Name, m.theme)
 	m.resetDocState()
 	m.status = fmt.Sprintf("Opened %s", path)
 	return m.onEdit()
@@ -181,7 +180,7 @@ func (m *Model) doSaveAs(path string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.ed.SetName(path)
-	m.lang = syntax.ForFilename(path)
+	m.hl = newHighlighter(path, m.cfg.Theme.Name, m.theme)
 	m.synStale = true
 	if err := fileio.WriteAtomic(path, m.ed.Bytes()); err != nil {
 		m.status = "Save failed: " + err.Error()

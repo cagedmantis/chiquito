@@ -44,8 +44,8 @@ func TestOpenPromptPrefillsCurrentFileDir(t *testing.T) {
 	if got := string(m.ed.Bytes()); got != "# hi\n" {
 		t.Errorf("content = %q", got)
 	}
-	if m.lang.Name() != "markdown" {
-		t.Errorf("language = %q, want markdown", m.lang.Name())
+	if m.langName() != "markdown" {
+		t.Errorf("language = %q, want markdown", m.langName())
 	}
 }
 

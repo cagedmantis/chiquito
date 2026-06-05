@@ -10,10 +10,11 @@ Optimized for SSH and local terminals; Unicode/UTF-8 throughout.
   fast edits, full Unicode.
 - **Emacs-style keybindings**, fully customizable (Emacs or Bubble Tea notation).
 - **File-browser pane** — `C-x C-f` opens a selectable list of the current
-  directory; **type to fuzzy-filter** and rank entries, navigate, enter
-  directories, open files.
+  directory; **type to fuzzy-filter** (fzf-style ranking with matched-character
+  highlighting), navigate, enter directories, open files.
 - **Incremental search** and **query-replace** with a case-sensitivity toggle.
-- **Syntax highlighting** for Go and Markdown (viewport-only, incremental).
+- **Syntax highlighting** via [Chroma](https://github.com/alecthomas/chroma):
+  ~250 languages and themeable colors (with a small builtin fallback).
 - **Asynchronous spell checking** that never blocks typing.
 - **TOML configuration** with **live hot-reload**.
 - **Secure file I/O**: non-blocking open, rejects non-regular files, atomic

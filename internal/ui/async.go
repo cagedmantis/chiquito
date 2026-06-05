@@ -109,6 +109,8 @@ func (m *Model) applyConfig(cfg config.Config) tea.Cmd {
 	m.lineNumbers = cfg.Editor.LineNumbers
 	m.tabWidth = cfg.Editor.TabWidth
 	m.ed.SetTabStops(cfg.Editor.TabWidth, cfg.Editor.ExpandTabs)
+	// Rebuild the highlighter so a changed theme (Chroma style) takes effect.
+	m.hl = newHighlighter(m.ed.Name(), cfg.Theme.Name, m.theme)
 	m.synStale = true
 
 	switch {

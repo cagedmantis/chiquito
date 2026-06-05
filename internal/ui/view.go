@@ -7,9 +7,15 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-
-	"argc.dev/chiquito/internal/syntax"
 )
+
+// langName returns the active highlighter's language name (for the status bar).
+func (m *Model) langName() string {
+	if m.hl == nil {
+		return "plain"
+	}
+	return m.hl.name
+}
 
 var (
 	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -62,38 +68,29 @@ func (m *Model) View() string {
 	return b.String()
 }
 
-// ensureSyntax recomputes the per-line entering lexical states when the document
-// has changed. This is O(lines) but happens at most once per edit, not per
-// frame; tokens for the visible rows are derived from these cached states.
+// ensureSyntax re-tokenizes the whole document into per-line styled spans when
+// it has changed. This is O(document) but happens at most once per edit, not per
+// frame; the visible rows just read the cached spans.
 func (m *Model) ensureSyntax() {
-	if !m.cfg.Features.SyntaxHighlighting || m.lang == nil {
+	if !m.cfg.Features.SyntaxHighlighting || m.hl == nil {
 		return
 	}
-	if !m.synStale && len(m.enterStates) == m.ed.LineCount() {
+	if !m.synStale {
 		return
 	}
-	n := m.ed.LineCount()
-	states := make([]syntax.State, n)
-	st := syntax.StateDefault
-	for i := 0; i < n; i++ {
-		states[i] = st
-		_, st = m.lang.TokenizeLine(m.ed.Line(i), st)
-	}
-	m.enterStates = states
+	m.hl.highlight(m.ed.Text())
 	m.synStale = false
 }
 
 // lineStyles builds a per-rune style slice for a line: syntax token colors,
-// overlaid with search-match highlights.
+// overlaid with spell and search highlights.
 func (m *Model) lineStyles(lineIdx int, runes []rune) []lipgloss.Style {
 	styles := make([]lipgloss.Style, len(runes))
 
-	if m.cfg.Features.SyntaxHighlighting && m.lang != nil && lineIdx < len(m.enterStates) {
-		tokens, _ := m.lang.TokenizeLine(string(runes), m.enterStates[lineIdx])
-		for _, tk := range tokens {
-			st := m.theme.style(tk.Type)
-			for i := tk.Start; i < tk.End && i < len(styles); i++ {
-				styles[i] = st
+	if m.cfg.Features.SyntaxHighlighting && m.hl != nil {
+		for _, sp := range m.hl.spansFor(lineIdx) {
+			for i := sp.start; i < sp.end && i < len(styles); i++ {
+				styles[i] = sp.style
 			}
 		}
 	}
@@ -197,7 +194,7 @@ func (m *Model) statusBar() string {
 	if m.status != "" {
 		left += "| " + m.status + " "
 	}
-	right := fmt.Sprintf(" %s  %d:%d ", m.lang.Name(), line+1, col+1)
+	right := fmt.Sprintf(" %s  %d:%d ", m.langName(), line+1, col+1)
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
