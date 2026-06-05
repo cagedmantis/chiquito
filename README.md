@@ -10,7 +10,8 @@ Optimized for SSH and local terminals; Unicode/UTF-8 throughout.
   fast edits, full Unicode.
 - **Emacs-style keybindings**, fully customizable (Emacs or Bubble Tea notation).
 - **File-browser pane** — `C-x C-f` opens a selectable list of the current
-  directory's files and folders (navigate, enter directories, open files).
+  directory; **type to fuzzy-filter** and rank entries, navigate, enter
+  directories, open files.
 - **Incremental search** and **query-replace** with a case-sensitivity toggle.
 - **Syntax highlighting** for Go and Markdown (viewport-only, incremental).
 - **Asynchronous spell checking** that never blocks typing.
@@ -51,8 +52,10 @@ chiquito [flags] [file]      # open a file, or a scratch buffer with no argument
 | `Esc` / `C-g` | cancel a prompt | | `C-x C-c` | quit |
 
 With `file_pane` enabled (the default), `C-x C-f` opens a **file-browser pane**
-in the bottom rows: `↑`/`↓` (or `C-p`/`C-n`) to move, `Enter` to open a file or
-enter a directory, `⌫`/`←` to go up, `Esc` to cancel. With `file_pane = false`
+in the bottom rows: **just start typing to fuzzy-filter** the listing (best
+matches rank first); `↑`/`↓` (or `C-p`/`C-n`) to move, `Enter` to open a file or
+enter a directory, `⌫` to delete a filter character (or go up when the filter is
+empty), `←` to go up, `Esc` to cancel. With `file_pane = false`
 it falls back to a text path prompt prefilled with a starting directory (the
 current file's directory, else the working directory, else home); there, as in
 Emacs, typing `//` resets to the filesystem root and `/~` resets to home.
@@ -70,7 +73,7 @@ schema.
 
 ## Project layout & development
 
-The editor core (`internal/{buffer,editor,search,syntax,spell,config,fileio}`)
+The editor core (`internal/{buffer,editor,search,syntax,spell,config,fileio,fuzzy}`)
 is framework-agnostic and does not import Bubble Tea; only `internal/ui` does.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased build history.

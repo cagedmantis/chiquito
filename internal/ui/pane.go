@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"argc.dev/chiquito/internal/fuzzy"
 )
 
 // A pane is a bottom-anchored, selectable mini-window. A command (the first
@@ -49,12 +51,14 @@ type fileEntry struct {
 }
 
 // filePane browses a directory: it lists the parent, sub-directories, and files
-// for selection. Choosing a directory navigates into it; choosing a file emits
-// an openFileMsg.
+// for selection, with a type-to-filter fuzzy search. Choosing a directory
+// navigates into it; choosing a file emits an openFileMsg.
 type filePane struct {
 	dir      string
-	entries  []fileEntry
-	selected int
+	entries  []fileEntry // all entries in dir (parent, dirs, files)
+	filter   string      // fuzzy filter text typed by the user
+	matches  []int       // indices into entries that match filter, ranked
+	selected int         // index into matches
 	top      int
 	note     string // error/status shown in the header when set
 }
@@ -107,6 +111,41 @@ func (p *filePane) load(dir string) {
 	sortEntries(dirs)
 	sortEntries(files)
 	p.entries = append(append(entries, dirs...), files...)
+
+	p.filter = ""
+	p.applyFilter()
+}
+
+// applyFilter recomputes the ranked list of matching entries for the current
+// filter. With no filter, entries keep their natural order (parent, dirs,
+// files); otherwise they are ranked by fuzzy score.
+func (p *filePane) applyFilter() {
+	p.matches = p.matches[:0]
+	if p.filter == "" {
+		for i := range p.entries {
+			p.matches = append(p.matches, i)
+		}
+	} else {
+		labels := make([]string, len(p.entries))
+		for i, e := range p.entries {
+			labels[i] = strings.TrimSuffix(e.label, "/")
+		}
+		for _, r := range fuzzy.Rank(p.filter, labels) {
+			p.matches = append(p.matches, r.Index)
+		}
+	}
+	if p.selected >= len(p.matches) {
+		p.selected = len(p.matches) - 1
+	}
+	if p.selected < 0 {
+		p.selected = 0
+	}
+	p.top = 0
+}
+
+func (p *filePane) setFilter(s string) {
+	p.filter = s
+	p.applyFilter()
 }
 
 func sortEntries(es []fileEntry) {
@@ -115,37 +154,49 @@ func sortEntries(es []fileEntry) {
 	})
 }
 
+// current returns the highlighted entry within the filtered list, or nil.
 func (p *filePane) current() *fileEntry {
-	if p.selected < 0 || p.selected >= len(p.entries) {
+	if p.selected < 0 || p.selected >= len(p.matches) {
 		return nil
 	}
-	return &p.entries[p.selected]
+	return &p.entries[p.matches[p.selected]]
 }
 
 func (p *filePane) update(msg tea.KeyMsg) (paneOutcome, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+g":
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyCtrlG:
 		return paneClose, nil
-	case "up", "ctrl+p":
+	case tea.KeyEnter:
+		return p.choose()
+	case tea.KeyUp, tea.KeyCtrlP:
 		p.move(-1)
-	case "down", "ctrl+n":
+	case tea.KeyDown, tea.KeyCtrlN:
 		p.move(1)
-	case "pgup":
+	case tea.KeyPgUp:
 		p.move(-(filePaneHeight - 1))
-	case "pgdown":
+	case tea.KeyPgDown:
 		p.move(filePaneHeight - 1)
-	case "home":
+	case tea.KeyHome:
 		p.selected = 0
-	case "end":
-		p.selected = len(p.entries) - 1
-	case "backspace", "left":
+	case tea.KeyEnd:
+		p.move(len(p.matches))
+	case tea.KeyLeft:
 		p.load(filepath.Dir(p.dir)) // go to parent
-	case "right":
+	case tea.KeyRight:
 		if e := p.current(); e != nil && e.isDir {
 			p.load(e.path)
 		}
-	case "enter":
-		return p.choose()
+	case tea.KeyBackspace:
+		// Backspace edits the filter; when it is empty, it goes to the parent.
+		if p.filter != "" {
+			p.setFilter(trimLastRune(p.filter))
+		} else {
+			p.load(filepath.Dir(p.dir))
+		}
+	case tea.KeySpace:
+		p.setFilter(p.filter + " ")
+	case tea.KeyRunes:
+		p.setFilter(p.filter + string(msg.Runes))
 	}
 	return paneStay, nil
 }
@@ -155,9 +206,17 @@ func (p *filePane) move(delta int) {
 	if p.selected < 0 {
 		p.selected = 0
 	}
-	if p.selected >= len(p.entries) {
-		p.selected = len(p.entries) - 1
+	if p.selected >= len(p.matches) {
+		p.selected = len(p.matches) - 1
 	}
+}
+
+func trimLastRune(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return string(r[:len(r)-1])
 }
 
 // choose acts on the highlighted entry: directories navigate, files are opened.
@@ -192,7 +251,13 @@ func (p *filePane) view(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := " Open file — " + p.dir + "  (↑↓ select · ↵ open/enter dir · ⌫ up · Esc cancel)"
+	header := " Open file — " + p.dir
+	if p.filter != "" {
+		header += "  filter: " + p.filter
+	}
+	if len(p.matches) == 0 {
+		header += "  (no matches)"
+	}
 	if p.note != "" {
 		header = " " + p.note
 	}
@@ -200,16 +265,20 @@ func (p *filePane) view(width, height int) string {
 	b.WriteByte('\n')
 
 	for i := 0; i < rows; i++ {
-		idx := p.top + i
+		mi := p.top + i
 		switch {
-		case idx >= len(p.entries):
+		case mi >= len(p.matches):
 			b.WriteString(fitWidth("", width))
-		case idx == p.selected:
-			b.WriteString(paneSelStyle.Render(fitWidth("> "+p.entries[idx].label, width)))
-		case p.entries[idx].isDir:
-			b.WriteString(paneDirStyle.Render(fitWidth("  "+p.entries[idx].label, width)))
 		default:
-			b.WriteString(fitWidth("  "+p.entries[idx].label, width))
+			e := p.entries[p.matches[mi]]
+			switch {
+			case mi == p.selected:
+				b.WriteString(paneSelStyle.Render(fitWidth("> "+e.label, width)))
+			case e.isDir:
+				b.WriteString(paneDirStyle.Render(fitWidth("  "+e.label, width)))
+			default:
+				b.WriteString(fitWidth("  "+e.label, width))
+			}
 		}
 		if i < rows-1 {
 			b.WriteByte('\n')
